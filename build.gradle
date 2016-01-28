@@ -27,7 +27,7 @@ repositories {
 
 dependencies {
     compile (
-        files('lib/mindterm.jar', 'lib/swt.jar'),
+        files('lib/mindterm.jar', 'lib/swt.jar', 'lib/win_64/swt.jar'),
         'org.apache.httpcomponents:httpclient:4.2.5',
         'log4j:log4j:1.2.17',
     )
@@ -43,6 +43,47 @@ jar {
     }
 }
 
+import com.github.jengelman.gradle.plugins.shadow.internal.DefaultDependencyFilter
+
+class WinDependencyFilter extends DefaultDependencyFilter {
+    private FileCollection exclude
+    
+    WinDependencyFilter(Project project, FileCollection exclude) {
+        super(project)
+        this.exclude = exclude
+    }
+    
+    FileCollection resolve(Configuration configuration) {
+        FileCollection fc = super.resolve(configuration)
+        return fc - this.exclude
+    }
+}
+
+import com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar
+
+task shadowJarWin64(type: ShadowJar) {
+    configureShadowJarWin(shadowJarWin64, 'win64')
+}
+
+task shadowJarWin32(type: ShadowJar) {
+    configureShadowJarWin(shadowJarWin32, 'win32')
+}
+
+def configureShadowJarWin(ShadowJar shadowJarWin, String platform) {
+    shadowJarWin.description = shadowJar.description + ' for ' + platform + ' platform'
+    shadowJarWin.conventionMapping.with {
+        map('classifier') {
+            'all'
+        }
+    }
+    shadowJarWin.destinationDir = file(shadowJar.destinationDir.getPath() + '/' + platform)
+    shadowJarWin.manifest.from shadowJar.manifest
+    shadowJarWin.from sourceSets.main.output
+    shadowJarWin.configurations = [project.configurations.runtime.copyRecursive()]
+    shadowJarWin.exclude 'META-INF/INDEX.LIST', 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA'
+    shadowJarWin.dependencyFilter = new WinDependencyFilter(getProject(), platform == 'win64' ? files('lib/swt.jar') : files('lib/win_64/swt.jar'))
+}
+
 sonarRunner {
     sonarProperties {
         property "sonar.jdbc.url", "jdbc:postgresql://localhost:5432/sonar"
@@ -51,11 +92,7 @@ sonarRunner {
     }
 }
 
-task prepareRelease {dependsOn build, shadowJar} << {
-    copy {
-        from configurations.runtime
-        into 'build/libs/lib'
-    }
+task prepareRelease {dependsOn build, shadowJarWin64, shadowJarWin32} << {
     copy {
         from 'resource/server-access'
         from 'resource/log4j.properties'
@@ -66,7 +103,7 @@ task prepareRelease {dependsOn build, shadowJar} << {
 task win32(dependsOn: prepareRelease) << {
     exec {
         workingDir 'nsis'
-        commandLine 'makensis', '-DArch=32', '-DbuildVersion=' + currentVersion, 'serveraccess2.nsi'
+        commandLine 'makensis', '-DArch=32', '-DbuildVersion=' + currentVersion, 'serveraccess32.nsi'
         standardOutput = new FileOutputStream('build/nsis.out')
         errorOutput = new FileOutputStream('build/nsis.err')
     }
@@ -75,7 +112,7 @@ task win32(dependsOn: prepareRelease) << {
 task win64(dependsOn: prepareRelease) << {
     exec {
         workingDir 'nsis'
-        commandLine 'makensis', '-DArch=64', '-DbuildVersion=' + currentVersion, 'serveraccess2.nsi'
+        commandLine 'makensis', '-DArch=64', '-DbuildVersion=' + currentVersion, 'serveraccess64.nsi'
         standardOutput = new FileOutputStream('build/nsis.out')
         errorOutput = new FileOutputStream('build/nsis.err')
     }
